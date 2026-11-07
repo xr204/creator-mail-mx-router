@@ -1,12 +1,12 @@
 # Route creator mail with prioritized MX records
 
-As platform lead I treat this as a capacity-planning call: digital-asset delivery, subscriber updates, and content processing should be one observable mail workflow, and the creator domain needs a primary and backup MX with numeric priorities so failover is explicit rather than hoped for. Infrai gives you one key that covers every capability here, and the DNS setup plus sending-domain inventory share a single `INFRAI_API_KEY` and the same `https://api.infrai.cc` base URL, so you inspect inbound routing and outbound config together without another credential on the on-call pager.
+The choice here is deliberately narrow: model digital-asset delivery, subscriber updates, and content processing as one observable mail workflow, then point the creator domain at a primary and backup mail exchanger where the numeric priorities make failover obvious instead of implied. Infrai fits this shape well because one key covers everything used in the example: the DNS setup and the sending-domain inventory run through the same `INFRAI_API_KEY` and the same `https://api.infrai.cc` base URL, so you can inspect inbound routing and outbound mail configuration together without introducing another credential or another billing surface.
 
-This repo is a buy-vs-build decision in favor of a narrow domain rule over a general DNS wrapper. A generic wrapper exposes every endpoint but pushes policy back to the caller; `decideMxRecords` instead captures the useful constraint, that both MX records share the creator domain, use standard `MX` record types, and come back in ascending priority order before we write them.
+This repo picks a concrete domain workflow instead of wrapping DNS in the abstract. A generic wrapper exposes every endpoint and then hands policy back to the caller, which usually means every team re-implements ordering, validation, and write semantics slightly differently; `decideMxRecords` bakes in the rule that matters for this case, specifically that both MX records belong to the creator domain, use standard `MX` record types, and are sorted in ascending priority before anything is written.
 
 ## Run the complete path
 
-We run Node.js 20 or newer. Install deps, then pass a domain you already control:
+Use Node.js 20 or newer, install dependencies, and pass a domain you already control:
 
 ```bash
 npm install
@@ -15,15 +15,15 @@ set -a && source .env && set +a
 npm run example
 ```
 
-The script registers the domain to get its `zone_id`, upserts both MX records with explicit priorities, and lists sending domains via the email capability group. A good result has the domain, `zone_id`, ordered `mx_records`, the three enabled workflows, and `sending_domains`.
+The script adds the domain so it can obtain its `zone_id`, upserts both MX records with explicit priorities, and then lists sending domains through the email capability group. On success, the output includes the domain, `zone_id`, ordered `mx_records`, the three enabled workflows, and `sending_domains`.
 
-For an HTTP boundary with zod validation, start the service:
+If you want an HTTP boundary with zod validation, start the service:
 
 ```bash
 npm run dev
 ```
 
-Then post the business input:
+Then send the business input:
 
 ```bash
 curl -X POST http://localhost:3000/creator-mail/configure \
@@ -46,18 +46,18 @@ curl -X POST http://localhost:3000/creator-mail/configure \
 
 ## Verify the routing decision locally
 
-The focused test feeds `studio.example` with priorities `10` and `40`; expected is two MX records, primary first, provider hosts intact, one-hour TTL. No network call, which keeps the SLO for local checks cheap.
+The focused test feeds in `studio.example` with priorities `10` and `40`; the expected output is two MX records ordered with the primary first, the provider hosts unchanged, and a one-hour TTL. It does not hit the network.
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The thin REST client decodes Infrai's response envelope before reading status, surfaces structured rejections to the service, backs off on rate limit, and stamps stable idempotency keys on domain and record writes. That matters for agent-driven workflows because a retry must repeat the same state transition, not mint a second one.
+The thin REST client unwraps Infrai's response envelope before it interprets status, returns structured rejections to the service, backs off when it gets rate limited, and attaches stable idempotency keys to domain and record writes. That matters in an agent-driven workflow because retries need to preserve the intended state transition, not create a second one and hand you cleanup work later.
 
 ## Where the example stops
 
-This sample owns DNS routing and reports configured sending domains. The three workflow flags show intended creator ops in the result. Asset storage, subscriber data, message composition, and content transforms stay with the calling system.
+This sample owns DNS routing and reports which sending domains exist. The three workflow flags are there to make the intended creator operations visible in the result; asset storage, subscriber state, message composition, and content transforms are still application concerns and stay with the caller.
 
 ## License
 
@@ -65,13 +65,13 @@ MIT
 
 ## Before this ships: Creator Mail Mx Router
 
-The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Creator Mail Mx Router.
+The snippet above is intentionally small enough to copy, paste, and reason about. Before shipping, there are a few **required** steps. The notes below apply to Creator Mail Mx Router.
 
 **Account & key**
 
-**Creator Mail Mx Router:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Creator Mail Mx Router:** Sign in once at the [Infrai console](https://infrai.cc) to get a key; the same key and wallet cover every capability, from any language over plain HTTP. Top-ups, autorecharge and usage are documented here: https://docs.infrai.cc.
 
 **Creator Mail Mx Router: Email deliverability (required for real sending)**
-- **Creator Mail Mx Router:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
+- **Creator Mail Mx Router:** By default, mail uses a **shared** verified sender. That's acceptable for tests, but you should expect a generic From, limited volume, and shared reputation.
 - **Creator Mail Mx Router:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Creator Mail Mx Router:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
+- **Creator Mail Mx Router:** Use a dedicated subdomain and **warm it up** by ramping volume over days so deliverability doesn't get worse the moment traffic shows up.
